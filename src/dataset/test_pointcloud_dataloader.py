@@ -4,7 +4,7 @@ from pointcloud_dataset import PointCloudCLIPDataset, collate_pointcloud
 from torch.utils.data import DataLoader
 
 CSV_PATH = "data/temp.csv"
-PCD_ROOT = "data/text2shape_pointcloud"
+PCD_ROOT = "data/text2shape_2048_pointcloud"
 
 if __name__ == "__main__":
     # 1️⃣ Split dataset
@@ -16,9 +16,9 @@ if __name__ == "__main__":
     train_dataset = PointCloudCLIPDataset(train_df, PCD_ROOT, use_color=True)
     train_loader = DataLoader(
         train_dataset,
-        batch_size=4,
+        batch_size=8,
         shuffle=True,
-        num_workers=4,
+        num_workers=2,
         pin_memory=True,
         collate_fn=collate_pointcloud,
     )
@@ -27,7 +27,10 @@ if __name__ == "__main__":
     batch = next(iter(train_loader))
     print("Keys:", batch.keys())
     print("Number of point clouds in batch:", len(batch["points"]))
-    print("Points shape of first:", batch["points"][0].shape)
+    print(len(batch["points"]))
+    for i in range(len(batch["points"])):
+        print("Points shape of first:", batch["points"][i].shape)
+    # print("Points shape of first:", batch["points"][0].shape)
     # print("Colors shape of first:", batch["colors"][0].shape)
     print("CLIP embedding shape:", batch["clip_emb"].shape)
     print("Model IDs:", batch["model_id"])
