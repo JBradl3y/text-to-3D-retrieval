@@ -19,6 +19,8 @@ if __name__ == '__main__':
         train_dataset,
         batch_size=8,        
         shuffle=True,
+        num_workers=4,      # number of CPU workers for data loading
+        pin_memory=True,    # speed up transfer to GPU
         collate_fn=collate_mesh 
     )
 
