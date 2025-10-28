@@ -31,6 +31,7 @@ class PointCloudCLIPDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         model_id = row["modelId"]
+        id = row["id"]  # Extract the 'id' column
         category = row["category"].lower()
 
         ply_path = os.path.join(self.root_dir, category, f"{model_id}.ply")
@@ -57,7 +58,6 @@ class PointCloudCLIPDataset(Dataset):
             # Then randomly sample additional points with replacement to reach num_points
             extra = np.random.choice(points_colors.shape[0], self.num_points - points_colors.shape[0], replace=True)
             idx_sample = np.concatenate([idx_sample, extra])
-            # idx_sample = np.random.choice(points.shape[0], self.num_points, replace=True)
         points_colors = points_colors[idx_sample]
 
         # --- Load CLIP embedding from CSV ---
@@ -70,6 +70,7 @@ class PointCloudCLIPDataset(Dataset):
             "points": torch.from_numpy(points_colors).float(),  # [num_points, 6] or [num_points, 3]
             "clip_emb": clip_emb,                                   # [512,]
             "model_id": model_id,
+            "id": id,  # Include the 'id' field in the returned dictionary
             "category": category,
         }
 
@@ -86,6 +87,7 @@ def collate_pointcloud(batch):
         "points": points,       # [B, C, N]
         "clip_emb": clip_emb,   # [B, 512]
         "model_id": [b["model_id"] for b in batch],
+        "id": [b["id"] for b in batch],  # Include 'id' in the batch dictionary
         "category": [b["category"] for b in batch],
     }
     return batch_dict

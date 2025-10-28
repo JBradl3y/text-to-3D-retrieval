@@ -24,24 +24,28 @@ def parse_args():
     parser.add_argument("--embedding_dim", type=int, default=512, help="Dimension of the embedding")
     parser.add_argument("--csv_path", type=str, default="data/captions.tablechair.emb.csv", help="Path to the CSV file")
     parser.add_argument("--pcd_root", type=str, default="data/text2shape_2048_pointcloud", help="Root directory for point cloud data")
+    parser.add_argument("--loss_type", type=str, default="InfoNCE_duplicated_positive", help="Type of loss function to use")
     parser.add_argument("--temperature", type=float, default=0.07, help="Temperature for InfoNCE loss")
     parser.add_argument("--patience", type=int, default=5, help="Patience for early stopping")
     return parser.parse_args()
 
 
 # ------------------ Contrastive InfoNCE Loss ------------------
-def contrastive_loss(point_emb, clip_emb, temperature=0.07):
+def contrastive_loss(point_emb, clip_emb, model_ids, temperature=0.07):
     # Normalize embeddings
     point_emb = F.normalize(point_emb, dim=1)
     clip_emb = F.normalize(clip_emb, dim=1)
 
     # Similarity matrix [B, B]
     logits = point_emb @ clip_emb.t() / temperature
-    labels = torch.arange(point_emb.size(0), device=point_emb.device)
+
+    # Create labels based on model IDs
+    labels = torch.eq(model_ids.unsqueeze(1), model_ids.unsqueeze(0)).float()
+    labels = labels / labels.sum(dim=1, keepdim=True)  # Normalize to create soft labels
 
     # Symmetric InfoNCE loss
-    loss_i = F.cross_entropy(logits, labels)
-    loss_t = F.cross_entropy(logits.t(), labels)
+    loss_i = -(labels * F.log_softmax(logits, dim=1)).sum(dim=1).mean()
+    loss_t = -(labels * F.log_softmax(logits.t(), dim=1)).sum(dim=1).mean()
     return (loss_i + loss_t) / 2
 
 
@@ -71,11 +75,12 @@ def train_one_epoch(model, dataloader, optimizer, device, temperature):
     for batch in tqdm(dataloader, desc="Training", leave=False):
         points = batch["points"].to(device)
         clip_emb = batch["clip_emb"].to(device)
+        model_ids = torch.tensor([hash(mid) for mid in batch["model_id"]], device=device)  # Convert string model IDs to integers and then to a tensor
 
         optimizer.zero_grad()
         point_emb = model(points)
 
-        loss = contrastive_loss(point_emb, clip_emb, temperature)
+        loss = contrastive_loss(point_emb, clip_emb, model_ids, temperature)
         loss.backward()
         optimizer.step()
 
@@ -91,9 +96,10 @@ def evaluate_one_epoch(model, dataloader, device, temperature):
         for batch in tqdm(dataloader, desc="Validation", leave=False):
             points = batch["points"].to(device)
             clip_emb = batch["clip_emb"].to(device)
+            model_ids = torch.tensor([hash(mid) for mid in batch["model_id"]], device=device)  # Convert string model IDs to hashed integers
 
             point_emb = model(points)
-            loss = contrastive_loss(point_emb, clip_emb, temperature)
+            loss = contrastive_loss(point_emb, clip_emb, model_ids, temperature)
             total_loss += loss.item()
     return total_loss / len(dataloader)
 
@@ -103,15 +109,17 @@ if __name__ == "__main__":
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    loss_type = args.loss_type
+
     results_dir = f"results/point_cloud_contrastive/batch_size_{args.batch_size}/lr_{args.learning_rate}/temperature_{args.temperature}/"
     os.makedirs(results_dir, exist_ok=True)
 
     # Save training parameters
     params = vars(args)
     params["device"] = str(device)
-    with open(os.path.join(results_dir, "training_params.json"), "w") as f:
+    with open(os.path.join(results_dir, f"training_params_{loss_type}.json"), "w") as f:
         json.dump(params, f, indent=4)
-    print("Training parameters saved to training_params.json")
+    print(f"Training parameters saved to training_params_{loss_type}.json")
 
     # Split dataset
     splitter = DatasetSplitter(args.csv_path)
@@ -151,9 +159,9 @@ if __name__ == "__main__":
 
         # Save best model
         if val_loss < early_stopping.best_loss:
-            torch.save(model.state_dict(), os.path.join(results_dir, "best_pointnet_contrastive.pth"))
+            torch.save(model.state_dict(), os.path.join(results_dir, f"best_pointnet_contrastive_{loss_type}.pth"))
             print("✅ Best model checkpoint saved.")
-            with open(os.path.join(results_dir, "best_model_info.json"), "w") as f:
+            with open(os.path.join(results_dir, f"best_model_info_{loss_type}.json"), "w") as f:
                 json.dump({"epoch": epoch + 1, "validation_loss": val_loss}, f, indent=4)
 
         # Early stopping
@@ -163,7 +171,7 @@ if __name__ == "__main__":
             break
 
     # Load the best model checkpoint
-    model.load_state_dict(torch.load(os.path.join(results_dir, "best_pointnet_contrastive.pth")))
+    model.load_state_dict(torch.load(os.path.join(results_dir, f"best_pointnet_contrastive_{loss_type}.pth")))
     print("Loaded best model checkpoint.")
 
     # Evaluate on test set
@@ -171,8 +179,8 @@ if __name__ == "__main__":
     print(f"Test Loss: {test_loss:.4f}")
 
     # Save test loss to a JSON file
-    with open(os.path.join(results_dir, "test_results.json"), "w") as f:
+    with open(os.path.join(results_dir, f"test_results_{loss_type}.json"), "w") as f:
         json.dump({"test_loss": test_loss}, f, indent=4)
-    print("Test results saved to test_results.json.")
+    print(f"Test results saved to test_results_{loss_type}.json.")
 
-    print("✅ Training complete! Model saved as best_pointnet_contrastive.pth")
+    print(f"✅ Training complete! Model saved as best_pointnet_contrastive_{loss_type}.pth")

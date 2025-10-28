@@ -17,6 +17,7 @@ class MeshCLIPDataset(Dataset):
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         mesh_path = os.path.join(self.mesh_root, row['category'].lower(), f"{row['modelId']}.ply")
+        id = row['id']  # Extract the 'id' column
         mesh = trimesh.load(mesh_path, process=False)
 
         # vertices, faces
@@ -41,5 +42,6 @@ class MeshCLIPDataset(Dataset):
             'colors': colors,
             'clip_emb': clip_emb,
             'model_id': row['modelId'],
+            'id': id,  # Include the 'id' field in the returned dictionary
             'category': row['category']
         }
